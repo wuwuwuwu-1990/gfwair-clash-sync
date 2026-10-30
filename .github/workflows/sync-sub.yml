@@ -1,0 +1,48 @@
+name: sync-sub
+
+on:
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-sub
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install --quiet requests cryptography
+
+      - name: Fetch and encrypt subscription
+        env:
+          PANEL_URL: ${{ secrets.PANEL_URL }}
+          PANEL_EMAIL: ${{ secrets.PANEL_EMAIL }}
+          PANEL_PASSWORD: ${{ secrets.PANEL_PASSWORD }}
+          ENC_PASSWORD: ${{ secrets.ENC_PASSWORD }}
+          PANEL_KIND: ${{ secrets.PANEL_KIND }}
+        run: python scripts/fetch_sub.py
+
+      - name: Commit changes
+        run: |
+          git config user.name "sub-sync-bot"
+          git config user.email "sub-sync-bot@users.noreply.github.com"
+          git add docs/sub.enc.json docs/status.json 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "no change"
+          else
+            git commit -m "chore(sync): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push
+          fi
