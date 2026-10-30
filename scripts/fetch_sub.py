@@ -132,10 +132,57 @@ def discover_panels(entry):
 
 
 # ---------- 适配器 ----------
-def try_v2board(s, base, email, pwd):
-    """V2Board / Xboard：POST /api/v1/passport/auth/login → GET /api/v1/user/getSubscribe
+def _safe_snip(text, n=170):
+    """把响应体截断并脱敏，便于日志排错又不泄露 token/订阅串。"""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    t = re.sub(r"(token=|token\":\")[A-Za-z0-9_\-]{6,}", r"\1****", t)
+    t = re.sub(r"(/link/)[A-Za-z0-9]{6,}", r"\1****", t)
+    t = re.sub(r"(subscribe\?)[A-Za-z0-9_\-=]{6,}", r"\1****", t)
+    return t[:n]
 
-    返回订阅链接字符串（失败返回 None），与其它适配器保持同一契约。
+
+def _v2_login_token(payload):
+    """从登录响应里取 token，兼容 V2Board / Xboard 的几种返回结构。"""
+    body = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(body, str) and body:
+        return body
+    if not isinstance(body, dict):
+        return None
+    for k in ("token", "auth_data", "authData", "access_token", "accessToken"):
+        v = body.get(k)
+        if isinstance(v, str) and v:
+            return v
+        if isinstance(v, dict):
+            for kk in ("token", "auth_data"):
+                vv = v.get(kk)
+                if isinstance(vv, str) and vv:
+                    return vv
+    return None
+
+
+def _v2_pick_sub(data, base):
+    """从 getSubscribe 的 data 里取订阅链接；取不到就用 token 自行拼。"""
+    if not isinstance(data, dict):
+        return None
+    for k in ("subscribe_url", "subscribeUrl", "subscribe_link", "url"):
+        v = data.get(k)
+        if isinstance(v, str) and v.startswith("http"):
+            return v
+    tok = data.get("token")
+    if isinstance(tok, str) and len(tok) >= 6:
+        return base.rstrip("/") + "/api/v1/client/subscribe?token=" + tok
+    return None
+
+
+def try_v2board(s, base, email, pwd):
+    """V2Board / Xboard 适配器。
+
+    登录: POST /api/v1/passport/auth/login  {"email":..,"password":..}
+    取订阅: GET /api/v1/user/getSubscribe（带登录 token）
+
+    不同面板对 token 的接受方式不一致（裸 token / Bearer / X-Token），
+    这里逐一组合尝试，并把每次的状态码和响应片段写进日志，便于定位 403。
+    返回订阅链接字符串，失败返回 None。
     """
     try:
         r = s.post(base + "/api/v1/passport/auth/login",
@@ -147,41 +194,55 @@ def try_v2board(s, base, email, pwd):
         log("  v2board 登录被 Cloudflare 挑战页拦截")
         return None
     if r.status_code != 200:
-        log(f"  v2board 登录 HTTP {r.status_code}")
+        log(f"  v2board 登录 HTTP {r.status_code} · {_safe_snip(r.text)}")
         return None
     try:
         j = r.json()
     except Exception:
-        log("  v2board 登录返回非 JSON（可能是自定义前端或防护页）")
+        log(f"  v2board 登录返回非 JSON · {_safe_snip(r.text, 120)}")
         return None
-    body = j.get("data") or {}
-    token = body.get("token") or body.get("auth_data")
-    if isinstance(token, dict):
-        token = token.get("token") or token.get("auth_data")
-    if not token:
-        log(f"  v2board 登录未取到 token，响应键: {list(j.keys())} {str(j)[:120]}")
-        return None
-    log("  v2board 登录成功")
 
-    try:
-        rr = s.get(base + "/api/v1/user/getSubscribe",
-                   headers={"Authorization": str(token)}, timeout=TIMEOUT)
-    except Exception as e:
-        log(f"  getSubscribe 请求异常 {type(e).__name__}")
+    token = _v2_login_token(j)
+    if not token:
+        log(f"  v2board 登录无 token，响应: {_safe_snip(json.dumps(j, ensure_ascii=False))}")
         return None
-    if rr.status_code != 200:
-        log(f"  getSubscribe HTTP {rr.status_code}")
-        return None
-    try:
-        data = rr.json().get("data") or {}
-    except Exception:
-        log("  getSubscribe 返回非 JSON")
-        return None
-    sub = data.get("subscribe_url") or data.get("subscribeUrl") or ""
-    if not sub:
-        log(f"  getSubscribe 无 subscribe_url，字段: {list(data.keys())[:12]}")
-        return None
-    return sub
+    log(f"  v2board 登录成功（token {len(token)} 字符）")
+
+    variants = (
+        ("裸token", {"Authorization": token}),
+        ("Bearer", {"Authorization": "Bearer " + token}),
+        ("X-Token", {"X-Token": token}),
+    )
+    endpoints = ("/api/v1/user/getSubscribe", "/api/v1/user/subscribe")
+    seen = []
+    for hname, hdr in variants:
+        for ep in endpoints:
+            try:
+                rr = s.get(base + ep, headers=hdr, timeout=TIMEOUT)
+            except Exception as e:
+                seen.append(f"{hname}{ep}:{type(e).__name__}")
+                log(f"    {hname} {ep} → 请求异常 {type(e).__name__}")
+                continue
+            code = rr.status_code
+            snippet = _safe_snip(rr.text)
+            log(f"    {hname} {ep} → HTTP {code} · {snippet[:110]}")
+            seen.append(f"{hname}{ep}:{code}")
+            if code != 200:
+                if code == 403 and rr.headers.get("cf-mitigated") == "challenge":
+                    log("      ↑ 这是 Cloudflare 挑战，不是账号问题")
+                continue
+            try:
+                data = rr.json().get("data")
+            except Exception:
+                log("      ↑ 返回非 JSON，跳过")
+                continue
+            sub = _v2_pick_sub(data, base)
+            if sub:
+                return sub
+            keys = list(data.keys())[:10] if isinstance(data, dict) else type(data).__name__
+            log(f"      ↑ 取到数据但没有订阅链接，字段: {keys}")
+    log(f"  v2board 全部组合失败: {', '.join(seen)}")
+    return None
 
 
 def try_sspanel(s, base, email, pwd):
