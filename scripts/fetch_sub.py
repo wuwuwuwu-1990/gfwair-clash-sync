@@ -141,22 +141,115 @@ def _safe_snip(text, n=170):
     return t[:n]
 
 
-def _v2_login_token(payload):
-    """从登录响应里取 token，兼容 V2Board / Xboard 的几种返回结构。"""
+def _v2_cands(payload):
+    """从登录响应里收集"可能是鉴权 token"的字符串，按可信度排序。
+
+    V2Board 系面板的 data 里常见字段：auth_data / token / expire_in。
+    其中只有 auth_data（或部分版本的 token）是会话凭据，另一个往往是**订阅 token**，
+    两者长度可能都是 32，混用就会拿到 "未登录或登陆已过期"。
+    """
     body = payload.get("data") if isinstance(payload, dict) else None
-    if isinstance(body, str) and body:
-        return body
-    if not isinstance(body, dict):
-        return None
-    for k in ("token", "auth_data", "authData", "access_token", "accessToken"):
-        v = body.get(k)
-        if isinstance(v, str) and v:
-            return v
-        if isinstance(v, dict):
-            for kk in ("token", "auth_data"):
-                vv = v.get(kk)
-                if isinstance(vv, str) and vv:
-                    return vv
+    items = []
+    if isinstance(body, str):
+        items.append(("data", body))
+    elif isinstance(body, dict):
+        for k in ("auth_data", "authData", "token", "access_token", "accessToken", "session"):
+            v = body.get(k)
+            if isinstance(v, str) and 16 <= len(v) <= 300:
+                items.append((k, v))
+        for k, v in body.items():
+            if isinstance(v, str) and 24 <= len(v) <= 300 and re.fullmatch(r"[A-Za-z0-9_.\-|=+/]+", v):
+                items.append((k, v))
+    seen, out = set(), []
+    for k, v in items:
+        if v in seen:
+            continue
+        seen.add(v)
+        out.append((k, v))
+    return out[:3]
+
+
+def looks_like_sub(r):
+    """判断响应是否真的是一份订阅（yaml / base64 节点 / 带 subscription-userinfo 头）。"""
+    if r is None or r.status_code != 200:
+        return False
+    if "subscription-userinfo" in str(r.headers).lower():
+        return True
+    head = r.content[:2000]
+    txt = head.decode("utf-8", "ignore")
+    if "proxies:" in txt or "proxy-groups:" in txt:
+        return True
+    if any(p in txt for p in ("ss://", "vmess://", "trojan://", "vless://", "hysteria")):
+        return True
+    try:
+        import base64 as _b64
+
+        pad = txt.strip().replace("\n", "")
+        dec = _b64.b64decode(pad[:1200] + "=" * (-len(pad[:1200]) % 4)).decode("utf-8", "ignore")
+        if any(p in dec for p in ("ss://", "vmess://", "trojan://", "vless://")):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _v2_try_api(s, base, cands):
+    """用若干「凭据值 × 传递方式」组合去调 getSubscribe，命中返回订阅链接。"""
+    forms = (
+        ("头 Authorization", lambda v: {"headers": {"Authorization": v}}),
+        ("头 Authorization+Bearer", lambda v: {"headers": {"Authorization": "Bearer " + v}}),
+        ("参数 auth_data", lambda v: {"params": {"auth_data": v}}),
+    )
+    tried = []
+    for cname, cval in cands:
+        for fname, mk in forms:
+            try:
+                rr = s.get(base + "/api/v1/user/getSubscribe", timeout=TIMEOUT, **mk(cval))
+            except Exception as e:
+                tried.append(f"{cname}/{fname}:{type(e).__name__}")
+                log(f"    {cname} · {fname} → 异常 {type(e).__name__}")
+                continue
+            code = rr.status_code
+            tried.append(f"{cname}/{fname}:{code}")
+            if code == 200:
+                try:
+                    data = rr.json().get("data")
+                except Exception:
+                    data = None
+                sub = _v2_pick_sub(data, base)
+                if sub:
+                    log(f"    {cname} · {fname} → HTTP 200 ✓")
+                    return sub
+                keys = list(data.keys())[:10] if isinstance(data, dict) else type(data).__name__
+                log(f"    {cname} · {fname} → HTTP 200 但无订阅字段: {keys}")
+            else:
+                log(f"    {cname} · {fname} → HTTP {code} · {_safe_snip(rr.text, 90)}")
+    log(f"  v2board 接口组合均未成: {'; '.join(tried)}")
+    return None
+
+
+def _v2_try_build(s, base, cands):
+    """直接用候选 token 拼订阅地址并验证——绕开 getSubscribe 的鉴权问题。
+
+    V2Board 订阅地址格式固定：{base}/api/v1/client/subscribe?token=<订阅token>
+    只要登录响应里带了这个 token，即便会话鉴权对不上也能拿到可用链接。
+    """
+    for cname, cval in cands:
+        url = base.rstrip("/") + "/api/v1/client/subscribe?token=" + cval
+        try:
+            rr = s.get(url, timeout=TIMEOUT)
+            ok = looks_like_sub(rr)
+            if not ok:
+                # 部分面板只给 Clash UA 下发节点列表，换 UA 再试一次
+                rr2 = s.get(url, timeout=TIMEOUT, headers={"User-Agent": "clash-verge/v2.0.0"})
+                if looks_like_sub(rr2):
+                    rr, ok = rr2, True
+        except Exception as e:
+            log(f"    拼接探测 {cname} → 异常 {type(e).__name__}")
+            continue
+        log(f"    拼接探测 {cname} → HTTP {rr.status_code}{' ✓ 是订阅内容' if ok else ' 不是订阅'}")
+        if ok:
+            return url
     return None
 
 
@@ -177,12 +270,9 @@ def _v2_pick_sub(data, base):
 def try_v2board(s, base, email, pwd):
     """V2Board / Xboard 适配器。
 
-    登录: POST /api/v1/passport/auth/login  {"email":..,"password":..}
-    取订阅: GET /api/v1/user/getSubscribe（带登录 token）
-
-    不同面板对 token 的接受方式不一致（裸 token / Bearer / X-Token），
-    这里逐一组合尝试，并把每次的状态码和响应片段写进日志，便于定位 403。
-    返回订阅链接字符串，失败返回 None。
+    两条独立通路，任一成功即返回：
+      A. 直接拼订阅地址（用登录响应里的 token 探测），不看会话鉴权
+      B. 调 /api/v1/user/getSubscribe（凭据值 × 传递方式 共 9 组）
     """
     try:
         r = s.post(base + "/api/v1/passport/auth/login",
@@ -202,46 +292,26 @@ def try_v2board(s, base, email, pwd):
         log(f"  v2board 登录返回非 JSON · {_safe_snip(r.text, 120)}")
         return None
 
-    token = _v2_login_token(j)
-    if not token:
-        log(f"  v2board 登录无 token，响应: {_safe_snip(json.dumps(j, ensure_ascii=False))}")
-        return None
-    log(f"  v2board 登录成功（token {len(token)} 字符）")
+    body = j.get("data") if isinstance(j, dict) else None
+    shape = (f"{k}({len(v)})" for k, v in body.items() if isinstance(v, str)) if isinstance(body, dict) else []
+    log(f"  v2board 登录响应字段: {', '.join(shape) or type(body).__name__}")
 
-    variants = (
-        ("裸token", {"Authorization": token}),
-        ("Bearer", {"Authorization": "Bearer " + token}),
-        ("X-Token", {"X-Token": token}),
-    )
-    endpoints = ("/api/v1/user/getSubscribe", "/api/v1/user/subscribe")
-    seen = []
-    for hname, hdr in variants:
-        for ep in endpoints:
-            try:
-                rr = s.get(base + ep, headers=hdr, timeout=TIMEOUT)
-            except Exception as e:
-                seen.append(f"{hname}{ep}:{type(e).__name__}")
-                log(f"    {hname} {ep} → 请求异常 {type(e).__name__}")
-                continue
-            code = rr.status_code
-            snippet = _safe_snip(rr.text)
-            log(f"    {hname} {ep} → HTTP {code} · {snippet[:110]}")
-            seen.append(f"{hname}{ep}:{code}")
-            if code != 200:
-                if code == 403 and rr.headers.get("cf-mitigated") == "challenge":
-                    log("      ↑ 这是 Cloudflare 挑战，不是账号问题")
-                continue
-            try:
-                data = rr.json().get("data")
-            except Exception:
-                log("      ↑ 返回非 JSON，跳过")
-                continue
-            sub = _v2_pick_sub(data, base)
-            if sub:
-                return sub
-            keys = list(data.keys())[:10] if isinstance(data, dict) else type(data).__name__
-            log(f"      ↑ 取到数据但没有订阅链接，字段: {keys}")
-    log(f"  v2board 全部组合失败: {', '.join(seen)}")
+    cands = _v2_cands(j)
+    if not cands:
+        log(f"  v2board 登录未取到可用 token · {_safe_snip(json.dumps(j, ensure_ascii=False))}")
+        return None
+    log(f"  v2board 登录成功，候选凭据: {', '.join(f'{k}({len(v)})' for k, v in cands)}")
+
+    log("  [3a] 直接拼接订阅地址探测")
+    sub = _v2_try_build(s, base, cands)
+    if sub:
+        log("  [3a] 命中，无需再走接口鉴权")
+        return sub
+
+    log("  [3b] 调取订阅接口（多组合）")
+    sub = _v2_try_api(s, base, cands)
+    if sub:
+        return sub
     return None
 
 
@@ -459,4 +529,18 @@ def write_status(out_dir, ok, message, updated=""):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except BaseException as e:  # 任何意外都要落 status.json，否则失败原因只能翻 Actions 日志
+        import traceback
+
+        traceback.print_exc()
+        log(f"!! 未捕获异常 {type(e).__name__}: {str(e)[:160]}")
+        try:
+            write_status(os.environ.get("OUT_DIR") or "docs", False,
+                         f"脚本异常 {type(e).__name__}: {str(e)[:120]}")
+        except Exception:
+            pass
+        sys.exit(1)
