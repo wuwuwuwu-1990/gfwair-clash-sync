@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "message": "抓取成功（v2board）",
+  "updated": "2026-10-31T03:35:27+08:00",
+  "run_at": "2026-10-31T03:35:27+08:00",
+  "log": [
+    "[2] 目标面板: https://xn--mest5a943ag8x.com",
+    "    面板识别: v2board  证据: v2board-api",
+    "[3] 登录并抓取订阅链接",
+    "  → v2board",
+    "  v2board 登录响应字段: token(32), auth_data(55)",
+    "  v2board 登录成功，候选凭据: auth_data(55), token(32)",
+    "  [3a] 直接拼接订阅地址探测",
+    "    拼接探测 auth_data → HTTP 403 不是订阅",
+    "    拼接探测 token → HTTP 200 ✓ 是订阅内容",
+    "  [3a] 命中，无需再走接口鉴权",
+    "[4] 成功: https://xn--mest...bb4b5a  (适配器=v2board)",
+    "[5] 已写入 docs/sub.enc.json（AES-256-GCM 加密，updated=2026-10-31T03:35:27+08:00）"
+  ]
+}
