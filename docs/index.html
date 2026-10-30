@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>订阅同步 - 加密数据仓库</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23185FA5'/%3E%3Cpath d='M50 22v40M32 44l18 18 18-18' stroke='white' stroke-width='9' fill='none' stroke-linecap='round'/%3E%3Cpath d='M26 76h48' stroke='white' stroke-width='9' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root{--ink:#1d1d1f;--ink2:#6e6e73;--line:rgba(0,0,0,.08)}
+*{box-sizing:border-box}
+body{margin:0;background:#f5f5f7;color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;
+  display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}
+.card{background:#fff;border-radius:20px;padding:34px 32px;max-width:560px;width:100%;
+  box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 28px rgba(0,0,0,.06)}
+h1{font-size:20px;font-weight:650;margin:0 0 6px;letter-spacing:-.02em}
+.sub{font-size:12.5px;color:var(--ink2);margin-bottom:22px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:11px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.row:last-of-type{border-bottom:none}
+.row .k{color:var(--ink2)}
+.row .v{font-weight:560;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+.note{background:rgba(24,95,165,.06);color:#2b4f74;border-radius:12px;padding:12px 14px;
+  font-size:12.5px;line-height:1.55;margin-top:20px}
+.bad{background:rgba(255,59,48,.07);color:#a01a12}
+a{color:#0071e3;text-decoration:none}
+a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>订阅同步 · 加密数据仓库</h1>
+  <div class="sub">本仓库只存放 AES-256-GCM 密文，不含任何账号、密码或明文订阅链接。</div>
+
+  <div class="row"><span class="k">数据文件</span><span class="v"><a href="./sub.enc.json">sub.enc.json</a></span></div>
+  <div class="row"><span class="k">运行状态</span><span class="v"><a href="./status.json">status.json</a></span></div>
+  <div class="row"><span class="k">加密算法</span><span class="v">AES-256-GCM</span></div>
+  <div class="row"><span class="k">密钥派生</span><span class="v">PBKDF2-SHA256 / 210000</span></div>
+
+  <div class="note">
+    数据由 GitHub Actions 定时抓取生成。解密入口在本地软件
+    <b>翻墙机场导入 Clash 便捷系统</b> 的「云端自动同步」卡片里，
+    需要填写与仓库 Secret 中 <b>ENC_PASSWORD</b> 完全一致的口令。
+    口令不存放在本仓库，请自行保管。
+  </div>
+
+  <div class="note bad">
+    切勿把主程序 html 上传到本仓库 —— 它内置了机场账号密码。
+    本页面及本仓库任何文件都不应包含明文凭据。
+  </div>
+</div>
+</body>
+</html>
