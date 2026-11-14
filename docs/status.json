@@ -1,8 +1,8 @@
 {
   "ok": true,
   "message": "抓取成功（v2board）",
-  "updated": "2026-11-13T11:18:30+08:00",
-  "run_at": "2026-11-13T11:18:30+08:00",
+  "updated": "2026-11-14T10:57:23+08:00",
+  "run_at": "2026-11-14T10:57:23+08:00",
   "log": [
     "[2] 目标面板: https://xn--mest5a943ag8x.com",
     "    面板识别: v2board  证据: v2board-api",
@@ -15,6 +15,6 @@
     "    拼接探测 token → HTTP 200 ✓ 是订阅内容",
     "  [3a] 命中，无需再走接口鉴权",
     "[4] 成功: https://xn--mest...bb4b5a  (适配器=v2board)",
-    "[5] 已写入 docs/sub.enc.json（AES-256-GCM 加密，updated=2026-11-13T11:18:30+08:00）"
+    "[5] 已写入 docs/sub.enc.json（AES-256-GCM 加密，updated=2026-11-14T10:57:23+08:00）"
   ]
 }
