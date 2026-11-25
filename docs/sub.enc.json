@@ -3,9 +3,9 @@
   "alg": "AES-GCM",
   "kdf": "PBKDF2-SHA256",
   "iter": 210000,
-  "salt": "v0f8o2j9TXjoSyTklWoh9Q==",
-  "iv": "ARUfMYRGcWn348TE",
-  "ct": "pftNDX/IyzpETdJGwKbTVk/iJRrA6iqZqP8HuNNe/WNzPRcEy0YKT4KBZ76a3/XYjgY5Lt6Kf1vKuWZMs7FglBggVD91ZNc+Y+yuu+qDhORaX977ijLfWKTm7pwP0m2t+Np5ODO2z3VXR/vdMO+HJulRhzZHvdJJqmeezAXhWOVo14IA+8mZkMKSybghLibuVsHfGRBEKoz+uhRKYHDXlCGmy0sr1sgXE3dPBhKNf6U4iHveumhohYad6cyeurgsAElCaJzT1yhpyNbXXJA1tw0Tr0M8udQIetUOZarObA==",
-  "updated": "2026-11-24T14:51:35+08:00",
+  "salt": "XkFom8DEjO0FLqdFb0iQqg==",
+  "iv": "XbcY7SwmUAN9xyyx",
+  "ct": "Xgld4NWIhoaRYuJUPPvI6lnG++HPrPNL55VQ1qmMsWBVrJO7r+4rv19xYdeJYR3KPCWT0MXSIr5//H9v2Opbwans1YBU08PVrZCAdduOBKnszH2/cUOeEWKHUyBjtcW+q2MDQdaMXBA9+SsBASFi0L+cJjkv9bhyCpQCoZf15imgSrrz4cqCvK0bJ/lQRiawmlWejruWh4MfWJWhbLSAS01p76RXIPlTAnrRm/yDlbW3FnnwnYN3Rbz/hIWixVC0nzYmDNbkRBhSMneCSvbIU0LLxAZ6kkXfSeNy6N9Yig==",
+  "updated": "2026-11-25T13:18:11+08:00",
   "by": "gfwair-clash-sync"
 }
